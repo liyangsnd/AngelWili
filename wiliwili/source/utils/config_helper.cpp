@@ -1129,12 +1129,17 @@ std::string ProgramConfig::getHomePath() {
 }
 
 std::string ProgramConfig::getConfigDir() {
+#ifdef ANGELWILI_CONFIG_NAME
+    const std::string name = ANGELWILI_CONFIG_NAME;
+#else
+    const std::string name = "wiliwili";
+#endif
 #ifdef __SWITCH__
-    return "/config/wiliwili";
+    return "/config/" + name;
 #elif defined(PS4)
-    return "/data/wiliwili";
+    return "/data/" + name;
 #elif defined(__PSV__)
-    return "ux0:/data/wiliwili";
+    return "ux0:/data/" + name;
 #elif defined(IOS)
     CFURLRef homeURL = CFCopyHomeDirectoryURL();
     if (homeURL != nullptr) {
@@ -1150,27 +1155,27 @@ std::string ProgramConfig::getConfigDir() {
     char currentPathBuffer[PATH_MAX];
     std::string currentPath = getcwd(currentPathBuffer, sizeof(currentPathBuffer));
 #ifdef _WIN32
-    return currentPath + "\\config\\wiliwili";
+    return currentPath + "\\config\\" + name;
 #else
-    return currentPath + "/config/wiliwili";
+    return currentPath + "/config/" + name;
 #endif /* _WIN32 */
 #else
 #ifdef __APPLE__
-    return std::string(getenv("HOME")) + "/Library/Application Support/wiliwili";
+    return std::string(getenv("HOME")) + "/Library/Application Support/" + name;
 #endif
 #ifdef __linux__
     std::string config = "";
     char* config_home  = getenv("XDG_CONFIG_HOME");
     if (config_home) config = std::string(config_home);
     if (config.empty()) config = std::string(getenv("HOME")) + "/.config";
-    return config + "/wiliwili";
+    return config + "/" + name;
 #endif
 #ifdef _WIN32
     WCHAR wpath[MAX_PATH];
     std::vector<char> lpath(MAX_PATH);
     SHGetSpecialFolderPathW(0, wpath, CSIDL_LOCAL_APPDATA, false);
     WideCharToMultiByte(CP_UTF8, 0, wpath, std::wcslen(wpath), lpath.data(), lpath.size(), nullptr, nullptr);
-    return std::string(lpath.data()) + "\\xfangfang\\wiliwili";
+    return std::string(lpath.data()) + "\\xfangfang\\" + name;
 #endif
 #endif /* _DEBUG */
 #endif /* __SWITCH__ */

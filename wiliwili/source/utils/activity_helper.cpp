@@ -13,6 +13,7 @@
 #include "activity/main_activity.hpp"
 #include "activity/gallery_activity.hpp"
 #include "activity/dlna_activity.hpp"
+#include "activity/live_browser_activity.hpp"
 #include "activity/dynamic_activity.hpp"
 #include "fragment/mine_collection_video_list.hpp"
 #include "fragment/inbox_view.hpp"
@@ -117,6 +118,14 @@ void Intent::openGallery(const std::vector<std::string>& data) {
 void Intent::openDLNA() {
     auto activity = new DLNAActivity();
     brls::Application::pushActivity(activity, brls::TransitionAnimation::NONE);
+}
+
+void Intent::openLiveBrowser() {
+    brls::Application::pushActivity(new LiveBrowserActivity());
+}
+
+void Intent::openPlatformLive(bool douyu, const std::string& room) {
+    brls::Application::pushActivity(new DLNAActivity(room, douyu), brls::TransitionAnimation::NONE);
 }
 
 void Intent::openActivity(const std::string& id) {

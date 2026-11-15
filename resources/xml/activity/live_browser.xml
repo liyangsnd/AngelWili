@@ -1,0 +1,7 @@
+<brls:AppletFrame headerHidden="true" footerHidden="false">
+    <brls:Box axis="column" width="100%" height="100%" backgroundColor="@theme/brls/background">
+        <brls:Label id="live/status" fontSize="22" height="60" marginLeft="20" marginRight="20" singleLine="true"/>
+        <RecyclingGrid id="live/rooms" grow="1" paddingLeft="20" paddingRight="20"
+                       spanCount="@style/wiliwili/grid/span/4" itemHeight="200"/>
+    </brls:Box>
+</brls:AppletFrame>

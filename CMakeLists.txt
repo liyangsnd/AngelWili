@@ -82,6 +82,10 @@ add_definitions(-DFONS_HASH_LUT_SIZE=4096)
 
 # Project Info
 project(wiliwili)
+set(ANGELWILI_CONFIG_NAME "angelwili" CACHE STRING "Application configuration directory name")
+if (NOT ANGELWILI_CONFIG_NAME MATCHES "^[A-Za-z0-9_-]+$")
+    message(FATAL_ERROR "ANGELWILI_CONFIG_NAME must be a directory basename")
+endif()
 set(VERSION_MAJOR "1")
 set(VERSION_MINOR "6")
 set(VERSION_REVISION "0")
@@ -200,9 +204,12 @@ endif ()
 
 # build borealis qrcode and other third party libraries
 add_subdirectory(library)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/DouyuJavaScript.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/DanmakuTLS.cmake)
 
 # Main Target
 program_target(${PROJECT_NAME} "${MAIN_SRC}")
+target_compile_definitions(${PROJECT_NAME} PRIVATE ANGELWILI_CONFIG_NAME="${ANGELWILI_CONFIG_NAME}")
 set_target_properties(${PROJECT_NAME} PROPERTIES
         CXX_STANDARD 17
         UNITY_BUILD ${BRLS_UNITY_BUILD}
@@ -302,6 +309,8 @@ elseif (PLATFORM_PS4)
     add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}.data)
 elseif (PLATFORM_SWITCH)
     set(BUILD_FONT_DIR ${CMAKE_BINARY_DIR}/resources/font)
+    set(SWITCH_NRO_TITLE "${PROJECT_NAME}" CACHE STRING "Switch homebrew display title")
+    set(SWITCH_NRO_BASENAME "${PROJECT_NAME}" CACHE STRING "Switch NRO output basename")
     if (GIT_TAG_VERSION)
         string(SUBSTRING ${GIT_TAG_VERSION} 1 -1 APP_VERSION)
     endif ()
@@ -313,12 +322,16 @@ elseif (PLATFORM_SWITCH)
     endif ()
     add_custom_target(${PROJECT_NAME}.nro
         DEPENDS ${PROJECT_NAME}
-        COMMAND ${NX_NACPTOOL_EXE} --create ${PROJECT_NAME} ${PROJECT_AUTHOR} ${APP_VERSION} ${PROJECT_NAME}.nacp
+        COMMAND ${NX_NACPTOOL_EXE} --create "${SWITCH_NRO_TITLE}" ${PROJECT_AUTHOR} ${APP_VERSION} "${SWITCH_NRO_BASENAME}.nacp"
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_RESOURCES} ${CMAKE_BINARY_DIR}/resources
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/docs/huya-protocol-notice.txt ${CMAKE_BINARY_DIR}/resources/huya-protocol-notice.txt
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${duktape_SOURCE_DIR}/LICENSE.txt ${CMAKE_BINARY_DIR}/resources/duktape-license.txt
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${DANMAKU_TLS_LICENSE} ${CMAKE_BINARY_DIR}/resources/mbedtls-license.txt
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${DANMAKU_TLS_DIR}/cacert.pem ${CMAKE_BINARY_DIR}/resources/danmaku-cacert.pem
         COMMAND ${CMAKE_COMMAND} -E remove -f ${BUILD_FONT_DIR}/*.txt ${BUILD_FONT_DIR}/switch_font.ttf
             ${BUILD_FONT_DIR}/keymap*.ttf
-        COMMAND ${NX_ELF2NRO_EXE} ${PROJECT_NAME}.elf ${PROJECT_NAME}.nro --icon=${PROJECT_ICON}
-            --nacp=${PROJECT_NAME}.nacp --romfsdir=${CMAKE_BINARY_DIR}/resources
+        COMMAND ${NX_ELF2NRO_EXE} ${PROJECT_NAME}.elf "${SWITCH_NRO_BASENAME}.nro" --icon=${PROJECT_ICON}
+            --nacp=${SWITCH_NRO_BASENAME}.nacp --romfsdir=${CMAKE_BINARY_DIR}/resources
         ALL
     )
 endif ()
@@ -326,4 +339,24 @@ endif ()
 target_include_directories(${PROJECT_NAME} PRIVATE wiliwili/include wiliwili/include/api ${APP_PLATFORM_INCLUDE})
 target_compile_options(${PROJECT_NAME} PRIVATE -ffunction-sections -fdata-sections -Wunused-variable ${APP_PLATFORM_OPTION})
 target_link_libraries(${PROJECT_NAME} PRIVATE wiliwiliLibExtra borealis lunasvg pystring pdr mongoose z ${APP_PLATFORM_LIB})
+target_link_libraries(${PROJECT_NAME} PRIVATE angelwili_javascript)
 target_link_options(${PROJECT_NAME} PRIVATE ${APP_PLATFORM_LINK_OPTION})
+
+option(ANGELWILI_BUILD_TESTS "Build native live resolver tests on desktop" OFF)
+if (ANGELWILI_BUILD_TESTS AND PLATFORM_DESKTOP)
+    foreach(platform huya douyu room_list douyu_danmaku huya_danmaku room_library)
+        add_executable(${platform}_test tests/${platform}_test.cpp
+            wiliwili/source/api/${platform}.cpp wiliwili/source/utils/string_helper.cpp)
+        if (platform STREQUAL "douyu_danmaku")
+            target_sources(${platform}_test PRIVATE wiliwili/source/api/huya_danmaku.cpp)
+        elseif (platform STREQUAL "huya")
+            target_sources(${platform}_test PRIVATE wiliwili/source/api/huya_danmaku.cpp)
+        elseif (platform STREQUAL "huya_danmaku")
+            target_sources(${platform}_test PRIVATE wiliwili/source/api/douyu_danmaku.cpp)
+        endif()
+        target_compile_features(${platform}_test PRIVATE cxx_std_17)
+        target_include_directories(${platform}_test PRIVATE wiliwili/include wiliwili/include/api
+            ${BOREALIS_LIBRARY}/include/borealis/extern)
+        target_link_libraries(${platform}_test PRIVATE cpr mongoose fmt z angelwili_javascript)
+    endforeach()
+endif()

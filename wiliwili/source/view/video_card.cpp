@@ -192,6 +192,7 @@ RecyclingGridItemRankVideoCard* RecyclingGridItemRankVideoCard::create(std::stri
 
 RecyclingGridItemLiveVideoCard::RecyclingGridItemLiveVideoCard() {
     this->inflateFromXMLRes("xml/views/video_card_live.xml");
+    setFavorite(false);
 }
 
 RecyclingGridItemLiveVideoCard::~RecyclingGridItemLiveVideoCard() {
@@ -201,6 +202,7 @@ RecyclingGridItemLiveVideoCard::~RecyclingGridItemLiveVideoCard() {
 
 void RecyclingGridItemLiveVideoCard::setCard(std::string pic, std::string title, std::string username, std::string area,
                                              int view_count, bool following) {
+    setFavorite(false);
     this->labelUsername->setText(username);
     this->labelTitle->setIsWrapping(false);
     this->labelTitle->setText(title);
@@ -214,6 +216,10 @@ void RecyclingGridItemLiveVideoCard::setCard(std::string pic, std::string title,
         this->svgUp->setVisibility(brls::Visibility::VISIBLE);
         this->boxHint->setVisibility(brls::Visibility::GONE);
     }
+}
+
+void RecyclingGridItemLiveVideoCard::setFavorite(bool favorite) {
+    favoriteBadge->setVisibility(favorite ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
 }
 
 RecyclingGridItemLiveVideoCard* RecyclingGridItemLiveVideoCard::create() {

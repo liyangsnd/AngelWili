@@ -43,6 +43,8 @@ public:
 
     // 开启 DLNA
     static void openDLNA();
+    static void openLiveBrowser();
+    static void openPlatformLive(bool douyu, const std::string& room);
 
     // 开启动态
     static void openActivity(const std::string& id);

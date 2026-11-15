@@ -17,6 +17,20 @@
                 cornerRadius="4"/>
 
         <brls:Box
+                id="video/card/favorite"
+                positionType="absolute"
+                positionTop="8"
+                positionRight="8"
+                width="26"
+                height="26"
+                cornerRadius="4"
+                backgroundColor="#222222"
+                justifyContent="center"
+                alignItems="center">
+            <SVGImage width="18" height="18" SVG="@res/svg/widget-favorite.svg"/>
+        </brls:Box>
+
+        <brls:Box
                 positionBottom="0"
                 positionType="absolute"
                 background="vertical_linear"

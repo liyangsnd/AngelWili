@@ -889,7 +889,7 @@ void VideoView::togglePlay() {
 
 void VideoView::setCustomToggleAction(std::function<void()> action) { this->customToggleAction = action; }
 
-void VideoView::setSpeed(float speed) { mpvCore->setSpeed(speed); }
+void VideoView::setSpeed(float speed) { mpvCore->setSpeed(isLiveMode ? 1.0f : speed); }
 
 void VideoView::setLastPlayedPosition(int64_t p) { lastPlayedPosition = p; }
 
@@ -1052,6 +1052,14 @@ void VideoView::hideDanmakuButton() {
     btnDanmakuSettingIcon->getParent()->setVisibility(brls::Visibility::GONE);
 }
 
+void VideoView::showDanmakuButton() {
+    enableDanmaku = true;
+    btnDanmakuIcon->setVisibility(brls::Visibility::VISIBLE);
+    btnDanmakuIcon->getParent()->setVisibility(brls::Visibility::VISIBLE);
+    btnDanmakuSettingIcon->setVisibility(brls::Visibility::VISIBLE);
+    btnDanmakuSettingIcon->getParent()->setVisibility(brls::Visibility::VISIBLE);
+}
+
 void VideoView::hideDLNAButton() {
     btnCastIcon->setVisibility(brls::Visibility::GONE);
     btnCastIcon->getParent()->setVisibility(brls::Visibility::GONE);
@@ -1060,6 +1068,11 @@ void VideoView::hideDLNAButton() {
 void VideoView::hideVideoQualityButton() {
     videoQuality->setVisibility(brls::Visibility::GONE);
     videoQuality->getParent()->setVisibility(brls::Visibility::GONE);
+}
+
+void VideoView::showVideoQualityButton() {
+    videoQuality->setVisibility(brls::Visibility::VISIBLE);
+    videoQuality->getParent()->setVisibility(brls::Visibility::VISIBLE);
 }
 
 void VideoView::hideVideoSpeedButton() {
@@ -1080,6 +1093,7 @@ void VideoView::hideStatusLabel() {
 
 void VideoView::setLiveMode() {
     isLiveMode = true;
+    mpvCore->setSpeed(1.0f);
     centerStatusLabel->setVisibility(brls::Visibility::GONE);
     rightStatusLabel->setVisibility(brls::Visibility::GONE);
     _setTvControlMode(false);
@@ -1726,6 +1740,7 @@ void VideoView::registerCommonActions(brls::Activity* activity) {
             return true;
         });
     activity->registerAction(ShortcutHelper::getVideoSpeed(), [this](...) -> bool {
+        if (isLiveMode) return true;
         CHECK_OSD(true);
         showSpeedList();
         return true;

@@ -118,10 +118,12 @@ public:
     void hideCenterHint();
 
     void hideDanmakuButton();
+    void showDanmakuButton();
 
     void hideDLNAButton();
 
     void hideVideoQualityButton();
+    void showVideoQualityButton();
 
     void hideVideoSpeedButton();
 

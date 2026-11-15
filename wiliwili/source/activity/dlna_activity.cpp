@@ -5,19 +5,25 @@
 #include <borealis/views/dialog.hpp>
 #include <borealis/core/thread.hpp>
 #include <borealis/core/logger.hpp>
+#include <borealis/core/ime.hpp>
 
 #include "activity/dlna_activity.hpp"
+#include "api/live/huya.hpp"
+#include "api/live/douyu.hpp"
 #include "bilibili/util/uuid.hpp"
 #include "utils/config_helper.hpp"
 #include "utils/number_helper.hpp"
 #include "view/video_view.hpp"
 #include "view/mpv_core.hpp"
+#include "view/grid_dropdown.hpp"
+#include "view/live_core.hpp"
+#include "api/live/room_library.hpp"
 
 using namespace brls::literals;
 
 #define GET_SETTING ProgramConfig::instance().getSettingItem
 
-DLNAActivity::DLNAActivity() {
+DLNAActivity::DLNAActivity(const std::string& room, bool douyu) : initialRoom(room), initialDouyu(douyu) {
     GA("open_dlna")
 
     MPVCore::instance().reset();
@@ -51,18 +57,46 @@ DLNAActivity::DLNAActivity() {
     dlnaEventSubscribeID = DLNA_EVENT.subscribe([this](const std::string& event, void* data) {
         if (event == "CurrentURI") {
             std::string url = std::string{(char*)data};
+            const std::string huyaTestMarker = "#angelwili-huya-test";
+            bool huyaTest = url.size() >= huyaTestMarker.size() &&
+                            url.compare(url.size() - huyaTestMarker.size(), huyaTestMarker.size(), huyaTestMarker) == 0;
+            if (huyaTest) url.erase(url.size() - huyaTestMarker.size());
+            const std::string douyuTestMarker = "#angelwili-douyu-test";
+            bool douyuTest = url.size() >= douyuTestMarker.size() &&
+                             url.compare(url.size() - douyuTestMarker.size(), douyuTestMarker.size(), douyuTestMarker) == 0;
+            if (douyuTest) url.erase(url.size() - douyuTestMarker.size());
             brls::Logger::info("CurrentURI: {}", url);
-            brls::sync([this, url]() {
+            brls::sync([this, url, huyaTest, douyuTest]() {
+                cancelLiveRetry();
+                stopLiveDanmaku();
+                activeRoom.clear();
                 MPVCore::instance().reset();
                 video->setTitle("wiliwili/setting/tools/others/dlna"_i18n);
                 video->showOSD(true);
-                MPVCore::instance().setUrl(url);
+                if (huyaTest || douyuTest) {
+                    video->setLiveMode();
+                    video->setSpeed(1.0f);
+                }
+                if (huyaTest) {
+                    MPVCore::instance().setUrl(
+                        url, "user-agent=\"curl/8.7.1\",referrer=\"https://www.huya.com/\","
+                             "http-header-fields=\"Origin: https://www.huya.com\",stream-lavf-o=\"seekable=0\"");
+                } else if (douyuTest) {
+                    MPVCore::instance().setUrl(
+                        url, "referrer=\"https://www.douyu.com/\","
+                             "http-header-fields=\"Origin: https://www.douyu.com\",stream-lavf-o=\"seekable=0\"");
+                } else {
+                    MPVCore::instance().setUrl(url);
+                }
             });
         } else if (event == "CurrentURIMetaData") {
             std::string name = std::string{(char*)data};
             brls::sync([this, name]() { video->setTitle(name); });
         } else if (event == "Stop") {
             brls::sync([this]() {
+                cancelLiveRetry();
+                stopLiveDanmaku();
+                activeRoom.clear();
                 MPVCore::instance().pause();
                 video->showOSD(false);
                 video->setTitle("wiliwili/setting/tools/others/dlna_waiting"_i18n);
@@ -93,7 +127,37 @@ DLNAActivity::DLNAActivity() {
         }
     });
 
-    mpvEventSubscribeID = MPV_E->subscribe([](MpvEventEnum event) {
+    qualityEvent = APP_E->subscribe([this](const std::string& event, void*) {
+        if (event == VideoView::QUALITY_CHANGE && !activeRoom.empty()) showLiveQuality();
+    });
+    mpvEventSubscribeID = MPV_E->subscribe([this](MpvEventEnum event) {
+        if (!activeRoom.empty()) {
+            if (event == LOADING_END) {
+                if (!playbackStarted) stableSince = std::chrono::steady_clock::now();
+                playbackStarted = true;
+                ignoreNextStop = false;
+                video->setStatusLabelLeft("");
+            } else if (event == UPDATE_PROGRESS && playbackStarted &&
+                       std::chrono::steady_clock::now() - stableSince >= std::chrono::seconds(10)) {
+                recoveryBudget.reset();
+            } else if (event == MPV_FILE_ERROR) {
+                scheduleLiveRetry(MPVCore::instance().mpv_error_code == MPV_ERROR_LOADING_FAILED ||
+                                  MPVCore::instance().mpv_error_code == MPV_ERROR_UNKNOWN_FORMAT);
+            } else if (event == MPV_STOP) {
+                if (ignoreNextStop) ignoreNextStop = false;
+                else scheduleLiveRetry(false);
+            } else if (event == END_OF_FILE) {
+                scheduleLiveRetry(false);
+            }
+            if (event == UPDATE_PROGRESS && playbackStarted && !historyRecorded && MPVCore::instance().video_progress > 0) {
+                live::RoomLibrary library(ProgramConfig::instance().getConfigDir() + "/live_rooms.json");
+                live::RoomSummary summary;
+                summary.id = activeRoom;
+                summary.title = liveTitle;
+                library.record(activeDouyu ? live::Platform::DOUYU : live::Platform::HUYA, summary);
+                historyRecorded = true;
+            }
+        }
         switch (event) {
             case MpvEventEnum::MPV_RESUME: {
                 std::string value = "PLAYING";
@@ -161,6 +225,27 @@ DLNAActivity::DLNAActivity() {
 }
 
 void DLNAActivity::onContentAvailable() {
+    this->video->registerAction("wiliwili/live_browser/retry"_i18n, brls::ControllerButton::BUTTON_START, [this](...) {
+        if (!activeRoom.empty()) loadLiveRoom(activeRoom, activeDouyu, selectedQuality);
+        return true;
+    });
+    this->video->registerAction("wiliwili/player/quality"_i18n, brls::ControllerButton::BUTTON_RB, [this](...) {
+        showLiveQuality();
+        return true;
+    });
+    this->video->registerAction("Live room", brls::ControllerButton::BUTTON_X, [this](...) {
+        auto alive = inputAlive;
+        BaseDropdown::text("Live platform", {"Huya", "Douyu"}, [this, alive](int selected) {
+            if (!*alive) return;
+            brls::Application::getImeManager()->openForText(
+                [this, alive, selected](const std::string& room) {
+                    if (!*alive) return;
+                    if (selected == 0) this->openHuyaRoom(room);
+                    else this->openDouyuRoom(room);
+                }, selected == 0 ? "Huya room" : "Douyu room", "", 16, "", 0);
+        }, 0);
+        return true;
+    });
     this->video->hideDLNAButton();
     this->video->hideDanmakuButton();
     this->video->hideVideoQualityButton();
@@ -194,6 +279,148 @@ void DLNAActivity::onContentAvailable() {
 
     // 手动将焦点 赋给video组件，这将允许焦点进入video组件内部
     brls::sync([this]() { brls::Application::giveFocus(video); });
+    if (!initialRoom.empty()) {
+        if (initialDouyu) openDouyuRoom(initialRoom);
+        else openHuyaRoom(initialRoom);
+    }
+}
+
+void DLNAActivity::openHuyaRoom(const std::string& room) { loadLiveRoom(room, false); }
+void DLNAActivity::openDouyuRoom(const std::string& room) { loadLiveRoom(room, true); }
+
+void DLNAActivity::loadLiveRoom(const std::string& room, bool douyu, int quality, bool recovery) {
+    if (requesting || room.empty() || room.size() > 16 || room.find_first_not_of("0123456789") != std::string::npos) return;
+    cancelLiveRetry();
+    if (!recovery) recoveryBudget.reset();
+    if (activeRoom != room || activeDouyu != douyu) {
+        liveQualities.clear();
+        historyRecorded = false;
+        stopLiveDanmaku();
+    }
+    activeRoom = room;
+    activeDouyu = douyu;
+    selectedQuality = quality;
+    requesting = true;
+    video->setStatusLabelLeft("wiliwili/live_browser/loading_stream"_i18n);
+    ASYNC_RETAIN
+    auto success = [ASYNC_TOKEN, room, douyu](auto result) {
+        brls::sync([ASYNC_TOKEN, room, douyu, result]() {
+            ASYNC_RELEASE
+            UNSET_REQUEST
+            if (activeRoom != room || activeDouyu != douyu) return;
+            ignoreNextStop = !MPVCore::instance().isStopped();
+            playbackStarted = false;
+            MPVCore::instance().reset();
+            liveQualities = result.qualities;
+            selectedQuality = result.selectedQuality;
+            video->setTitle(result.title);
+            liveTitle = result.title;
+            video->showOSD(true);
+            video->setLiveMode();
+            video->setSpeed(1.0f);
+            video->showVideoQualityButton();
+            video->showDanmakuButton();
+            if (!douyuDanmaku) {
+                LiveDanmakuCore::instance().reset();
+                LiveDanmakuCore::instance().refresh();
+                douyuDanmaku = std::make_unique<live::DouyuDanmakuClient>();
+                douyuDanmaku->start(activeRoom, !activeDouyu, result.danmakuRegistration);
+                pollLiveDanmaku();
+            }
+            for (const auto& option : liveQualities) if (option.id == selectedQuality) video->setQuality(option.name);
+            const std::string options = activeDouyu
+                ? "referrer=\"https://www.douyu.com/\",http-header-fields=\"Origin: https://www.douyu.com\",stream-lavf-o=\"seekable=0\",network-timeout=10"
+                : "user-agent=\"curl/8.7.1\",referrer=\"https://www.huya.com/\",http-header-fields=\"Origin: https://www.huya.com\",stream-lavf-o=\"seekable=0\",network-timeout=10";
+            MPVCore::instance().setUrl(result.url, options);
+        });
+    };
+    auto failure = [ASYNC_TOKEN, room, douyu](std::string message) {
+        brls::sync([ASYNC_TOKEN, room, douyu, message]() {
+            ASYNC_RELEASE
+            UNSET_REQUEST
+            if (activeRoom != room || activeDouyu != douyu) return;
+            video->setStatusLabelLeft(message);
+            scheduleLiveRetry(false);
+        });
+    };
+    if (douyu) live::requestDouyuRoom(room, success, failure, quality);
+    else live::requestHuyaRoom(room, success, failure, quality);
+}
+
+void DLNAActivity::cancelLiveRetry() {
+    brls::cancelDelay(retryDelay);
+    retryDelay = 0;
+    retryPending = false;
+}
+
+void DLNAActivity::scheduleLiveRetry(bool downgrade) {
+    if (activeRoom.empty() || requesting) return;
+    if (downgrade) {
+        int lower = live::lowerQuality(liveQualities, selectedQuality);
+        if (lower >= 0) selectedQuality = lower;
+    }
+    if (retryPending) return;
+    const int delay = recoveryBudget.nextDelay();
+    if (!delay) {
+        video->setStatusLabelLeft("wiliwili/live_browser/retry_failed"_i18n);
+        return;
+    }
+    playbackStarted = false;
+    retryPending = true;
+    video->setStatusLabelLeft("wiliwili/live_browser/reconnecting"_i18n + " " + std::to_string(recoveryBudget.attempts) + "/3");
+    auto guard = inputAlive;
+    retryDelay = brls::delay(delay, [this, guard]() {
+        if (!*guard) return;
+        retryPending = false;
+        retryDelay = 0;
+        loadLiveRoom(activeRoom, activeDouyu, selectedQuality, true);
+    });
+}
+
+void DLNAActivity::showLiveQuality() {
+    if (activeRoom.empty() || requesting || liveQualities.empty()) return;
+    std::vector<std::string> names;
+    int selected = 0;
+    for (size_t index = 0; index < liveQualities.size(); ++index) {
+        names.push_back(liveQualities[index].name);
+        if (liveQualities[index].id == selectedQuality) selected = static_cast<int>(index);
+    }
+    auto guard = inputAlive;
+    const auto choices = liveQualities;
+    BaseDropdown::text("wiliwili/player/quality"_i18n, names, [this, guard, choices](int index) {
+        if (!*guard || requesting || index < 0 || static_cast<size_t>(index) >= choices.size()) return;
+        loadLiveRoom(activeRoom, activeDouyu, choices[index].id);
+    }, selected);
+}
+
+void DLNAActivity::stopLiveDanmaku() {
+    brls::cancelDelay(danmakuDelay);
+    danmakuDelay = 0;
+    douyuDanmaku.reset();
+    LiveDanmakuCore::instance().reset();
+}
+
+void DLNAActivity::pollLiveDanmaku() {
+    if (!douyuDanmaku) return;
+    std::vector<LiveDanmakuItem> items;
+    for (auto& incoming : douyuDanmaku->drain()) {
+        auto message = std::make_shared<message::Danmaku>();
+        message->dan = std::move(incoming.text);
+        message->user_name = std::move(incoming.sender);
+        items.emplace_back(message);
+        items.back().time = std::chrono::system_clock::now();
+    }
+    LiveDanmakuCore::instance().add(items);
+    const auto state = douyuDanmaku->state();
+    if (state == live::DouyuDanmakuClient::State::CONNECTED)
+        video->setOnlineCount("wiliwili/live_browser/danmaku_connected"_i18n);
+    else if (state == live::DouyuDanmakuClient::State::FAILED)
+        video->setOnlineCount("wiliwili/live_browser/danmaku_failed"_i18n);
+    else video->setOnlineCount("wiliwili/live_browser/danmaku_connecting"_i18n);
+    auto guard = inputAlive;
+    danmakuDelay = brls::delay(100, [this, guard]() {
+        if (*guard) pollLiveDanmaku();
+    });
 }
 
 void DLNAActivity::dismiss() {
@@ -205,6 +432,11 @@ void DLNAActivity::dismiss() {
 }
 
 DLNAActivity::~DLNAActivity() {
+    *inputAlive = false;
+    cancelLiveRetry();
+    stopLiveDanmaku();
+    activeRoom.clear();
+    APP_E->unsubscribe(qualityEvent);
     MPV_E->unsubscribe(mpvEventSubscribeID);
     DLNA_EVENT.unsubscribe(dlnaEventSubscribeID);
     dlna->stop();
