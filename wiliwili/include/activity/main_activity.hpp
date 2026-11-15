@@ -21,6 +21,7 @@
 
 class CustomButton;
 class AutoTabFrame;
+class AutoSidebarItem;
 
 class MainActivity : public brls::Activity {
 public:
@@ -35,4 +36,5 @@ private:
     BRLS_BIND(CustomButton, settingBtn, "main/setting");
     BRLS_BIND(CustomButton, inboxBtn, "main/inbox");
     BRLS_BIND(AutoTabFrame, tabFrame, "main/tabFrame");
+    BRLS_BIND(AutoSidebarItem, liveBtn, "main/live");
 };

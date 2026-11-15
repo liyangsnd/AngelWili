@@ -72,6 +72,7 @@ public:
     View* getView(std::string id) override;
 
     void setAttachedViewCreator(TabViewCreator creator);
+    void setCommandAction(const brls::ActionListener& action);
 
     ~AutoSidebarItem() override;
 
@@ -107,6 +108,7 @@ private:
     bool active                        = false;
     View* attachedView                 = nullptr;
     TabViewCreator attachedViewCreator = nullptr;
+    brls::ActionListener commandAction;
     std::string iconDefault, iconActivate;
 };
 

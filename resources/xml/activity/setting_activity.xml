@@ -311,7 +311,6 @@
                                 height="auto"
                                 title="@i18n/wiliwili/setting/tools/tutorial/header"
                                 marginBottom="0px"/>
-                        <brls:RadioCell id="tools/live_browser" title="@i18n/wiliwili/live_browser/entry"/>
                         <brls:Box
                                 width="100%"
                                 height="auto"

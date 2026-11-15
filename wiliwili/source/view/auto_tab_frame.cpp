@@ -283,7 +283,7 @@ AutoSidebarItem* AutoTabFrame::getTab(size_t value) {
 void AutoTabFrame::handleXMLElement(tinyxml2::XMLElement* element) {
     std::string name = element->Name();
 
-    if (name == "Tab") {
+    if (name == "Tab" || name == "Command") {
         const tinyxml2::XMLAttribute* labelAttribute = element->FindAttribute("label");
         const tinyxml2::XMLAttribute* styleAttribute = element->FindAttribute("style");
 
@@ -296,6 +296,15 @@ void AutoTabFrame::handleXMLElement(tinyxml2::XMLElement* element) {
         AutoSidebarItem* item = new AutoSidebarItem();
         item->applyXMLAttribute("style", tabStyle);
         item->applyXMLAttributes(element);
+
+        if (name == "Command") {
+            if (element->FirstChildElement()) brls::fatal("\"Command\" cannot contain a child view");
+            item->setDefaultBackgroundColor(this->tabItemBackgroundColor);
+            item->setActiveBackgroundColor(this->tabItemActiveBackgroundColor);
+            item->setActiveTextColor(this->tabItemActiveTextColor);
+            this->addItem(item, [] { return nullptr; }, [](brls::View*) {});
+            return;
+        }
 
         tinyxml2::XMLElement* viewElement = element->FirstChildElement();
 
@@ -770,6 +779,7 @@ AutoSidebarItem::AutoSidebarItem() : Box(brls::Axis::ROW) {
     this->registerAction(
         "hints/ok"_i18n, brls::BUTTON_A,
         [this](View* view) {
+            if (commandAction) return commandAction(view);
             if (this->attachedView) brls::Application::giveFocus(this->attachedView);
             return true;
         },
@@ -777,7 +787,7 @@ AutoSidebarItem::AutoSidebarItem() : Box(brls::Axis::ROW) {
 
     this->addGestureRecognizer(
         new brls::TapGestureRecognizer([this](brls::TapGestureStatus status, brls::Sound* soundToPlay) {
-            if (this->active) return;
+            if (this->active && !commandAction) return;
 
             this->playClickAnimation(status.state != brls::GestureState::UNSURE);
 
@@ -791,13 +801,16 @@ AutoSidebarItem::AutoSidebarItem() : Box(brls::Axis::ROW) {
                     break;
                 case brls::GestureState::END:
                     *soundToPlay = brls::SOUND_CLICK_SIDEBAR;
-                    brls::Application::giveFocus(this);
+                    if (commandAction) commandAction(this);
+                    else brls::Application::giveFocus(this);
                     break;
                 default:
                     break;
             }
         }));
 }
+
+void AutoSidebarItem::setCommandAction(const brls::ActionListener& action) { commandAction = action; }
 
 void AutoSidebarItem::setTabStyle(AutoTabBarStyle style) {
     if (style == AutoTabBarStyle::NONE) brls::fatal("SidebarItem style cannot be set to \"None\"");

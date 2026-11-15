@@ -26,6 +26,17 @@
 MainActivity::~MainActivity() { brls::Logger::debug("del MainActivity"); }
 
 void MainActivity::onContentAvailable() {
+    this->liveBtn->setCommandAction([](brls::View*) {
+        Intent::openLiveBrowser();
+        return true;
+    });
+    this->liveBtn->getFocusEvent()->subscribe([this](bool focused) {
+        if (!focused) return;
+        if (tabFrame->getSideBarPosition() == AutoTabBarPosition::LEFT)
+            liveBtn->setCustomNavigationRoute(brls::FocusDirection::RIGHT, tabFrame->getActiveTab());
+        else if (tabFrame->getSideBarPosition() == AutoTabBarPosition::TOP)
+            liveBtn->setCustomNavigationRoute(brls::FocusDirection::DOWN, tabFrame->getActiveTab());
+    });
     this->registerAction(
         "Settings", brls::ControllerButton::BUTTON_BACK,
         [](brls::View* view) -> bool {

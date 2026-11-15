@@ -1,5 +1,6 @@
 {
   "live_browser": {
+    "nav": "Live",
     "favorite": "Toggle favorite",
     "library": "Library",
     "favorites": "Favorite rooms",

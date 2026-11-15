@@ -31,11 +31,16 @@
 
             <Tab label=""
                  fontSize="18"
-                 focusDown="main/inbox"
                  icon="@res/svg/ico-mine.svg"
                  iconActivate="@res/svg/ico-mine-activate.svg">
                 <MineTab/>
             </Tab>
+            <Command id="main/live"
+                     label="@i18n/wiliwili/live_browser/nav"
+                     fontSize="18"
+                     focusDown="main/inbox"
+                     icon="@res/svg/ico-live.svg"
+                     iconActivate="@res/svg/ico-live-activate.svg"/>
         </AutoTabFrame>
         <brls:Box
                 wireframe="false"
