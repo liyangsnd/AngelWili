@@ -15,7 +15,7 @@
 
 namespace live {
 
-HuyaRoom parseHuyaRoom(const std::string& page, int requestedQuality) {
+HuyaRoom parseHuyaRoom(const std::string& page, int requestedQuality, const std::string& requestedLine) {
     if (requestedQuality < -1) throw std::runtime_error("Invalid Huya quality");
     std::smatch match;
     const std::regex marker(R"("?stream"?\s*:\s*)");
@@ -35,7 +35,17 @@ HuyaRoom parseHuyaRoom(const std::string& page, int requestedQuality) {
     std::stable_sort(streams.begin(), streams.end(), [](const auto& left, const auto& right) {
         return left.value("sCdnType", "") == "HS" && right.value("sCdnType", "") != "HS";
     });
-    const auto& stream = streams.at(0);
+    std::vector<StreamLine> lines;
+    size_t selectedStream = 0;
+    for (size_t index = 0; index < streams.size(); ++index) {
+        const auto id = std::to_string(index);
+        const auto type = streams.at(index).value("sCdnType", "");
+        lines.push_back({id, type.empty() ? "Line " + std::to_string(index + 1) : type});
+        if (id == requestedLine) selectedStream = index;
+    }
+    if (!requestedLine.empty() && requestedLine != std::to_string(selectedStream))
+        throw std::runtime_error("Requested Huya line unavailable");
+    const auto& stream = streams.at(selectedStream);
     std::string anticode = stream.at("sFlvAntiCode").get<std::string>();
     for (size_t position = 0; (position = anticode.find("&amp;", position)) != std::string::npos;)
         anticode.replace(position, 5, "&");
@@ -89,24 +99,24 @@ HuyaRoom parseHuyaRoom(const std::string& page, int requestedQuality) {
     auto title = room.at("gameLiveInfo").value("roomName", "");
     if (title.empty()) title = room.at("gameLiveInfo").value("introduction", "");
     if (title.empty()) title = "Huya live";
-    return {title, url, qualities, bitrate, huyaRegistration(page)};
+    return {title, url, qualities, bitrate, huyaRegistration(page), lines, std::to_string(selectedStream)};
 }
 
 void requestHuyaRoom(const std::string& room, const std::function<void(HuyaRoom)>& success,
-                     const std::function<void(std::string)>& error, int quality) {
+                     const std::function<void(std::string)>& error, int quality, const std::string& line) {
     if (room.empty() || room.find_first_not_of("0123456789") != std::string::npos) {
         error("Invalid Huya room number");
         return;
     }
-    cpr::GetCallback([room, success, error, quality](const cpr::Response& response) {
+    cpr::GetCallback([room, success, error, quality, line](const cpr::Response& response) {
         if (response.error || response.status_code != 200) {
             error("Huya room request failed (HTTP " + std::to_string(response.status_code) + ")");
             return;
         }
         try {
-            auto result = parseHuyaRoom(response.text, quality);
+            auto result = parseHuyaRoom(response.text, quality, line);
             if (result.danmakuRegistration.empty()) {
-                auto mobile = cpr::Get(cpr::Url{"https://m.huya.com/" + room}, cpr::Timeout{10000},
+                auto mobile = cpr::Get(cpr::Url{"https://m.huya.com/" + room}, cpr::Timeout{2000},
                     cpr::Header{{"User-Agent", "Mozilla/5.0 (Linux; Android 6.0) Mobile Safari/537.36"}});
                 if (!mobile.error && mobile.status_code == 200) result.danmakuRegistration = huyaRegistration(mobile.text);
             }

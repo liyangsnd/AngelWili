@@ -233,6 +233,10 @@ void DLNAActivity::onContentAvailable() {
         showLiveQuality();
         return true;
     });
+    this->video->registerAction("wiliwili/live_browser/line"_i18n, brls::ControllerButton::BUTTON_LSB, [this](...) {
+        showLiveLine();
+        return true;
+    });
     this->video->registerAction("Live room", brls::ControllerButton::BUTTON_X, [this](...) {
         auto alive = inputAlive;
         BaseDropdown::text("Live platform", {"Huya", "Douyu"}, [this, alive](int selected) {
@@ -288,12 +292,15 @@ void DLNAActivity::onContentAvailable() {
 void DLNAActivity::openHuyaRoom(const std::string& room) { loadLiveRoom(room, false); }
 void DLNAActivity::openDouyuRoom(const std::string& room) { loadLiveRoom(room, true); }
 
-void DLNAActivity::loadLiveRoom(const std::string& room, bool douyu, int quality, bool recovery) {
+void DLNAActivity::loadLiveRoom(const std::string& room, bool douyu, int quality, bool recovery,
+                                const std::string& line) {
     if (requesting || room.empty() || room.size() > 16 || room.find_first_not_of("0123456789") != std::string::npos) return;
     cancelLiveRetry();
     if (!recovery) recoveryBudget.reset();
     if (activeRoom != room || activeDouyu != douyu) {
         liveQualities.clear();
+        liveLines.clear();
+        selectedLine.clear();
         historyRecorded = false;
         stopLiveDanmaku();
     }
@@ -312,7 +319,9 @@ void DLNAActivity::loadLiveRoom(const std::string& room, bool douyu, int quality
             playbackStarted = false;
             MPVCore::instance().reset();
             liveQualities = result.qualities;
+            liveLines = result.lines;
             selectedQuality = result.selectedQuality;
+            selectedLine = result.selectedLine;
             video->setTitle(result.title);
             liveTitle = result.title;
             video->showOSD(true);
@@ -343,8 +352,9 @@ void DLNAActivity::loadLiveRoom(const std::string& room, bool douyu, int quality
             scheduleLiveRetry(false);
         });
     };
-    if (douyu) live::requestDouyuRoom(room, success, failure, quality);
-    else live::requestHuyaRoom(room, success, failure, quality);
+    const std::string requestedLine = line.empty() ? selectedLine : line;
+    if (douyu) live::requestDouyuRoom(room, success, failure, quality, requestedLine);
+    else live::requestHuyaRoom(room, success, failure, quality, requestedLine);
 }
 
 void DLNAActivity::cancelLiveRetry() {
@@ -359,6 +369,13 @@ void DLNAActivity::scheduleLiveRetry(bool downgrade) {
         int lower = live::lowerQuality(liveQualities, selectedQuality);
         if (lower >= 0) selectedQuality = lower;
     }
+    std::string retryLine;
+    if (liveLines.size() > 1) {
+        size_t current = 0;
+        for (size_t index = 0; index < liveLines.size(); ++index)
+            if (liveLines[index].id == selectedLine) current = index;
+        retryLine = liveLines[(current + 1) % liveLines.size()].id;
+    }
     if (retryPending) return;
     const int delay = recoveryBudget.nextDelay();
     if (!delay) {
@@ -369,11 +386,12 @@ void DLNAActivity::scheduleLiveRetry(bool downgrade) {
     retryPending = true;
     video->setStatusLabelLeft("wiliwili/live_browser/reconnecting"_i18n + " " + std::to_string(recoveryBudget.attempts) + "/3");
     auto guard = inputAlive;
-    retryDelay = brls::delay(delay, [this, guard]() {
+    retryDelay = brls::delay(delay, [this, guard, retryLine]() {
         if (!*guard) return;
         retryPending = false;
         retryDelay = 0;
-        loadLiveRoom(activeRoom, activeDouyu, selectedQuality, true);
+        if (!retryLine.empty()) selectedLine = retryLine;
+        loadLiveRoom(activeRoom, activeDouyu, selectedQuality, true, retryLine);
     });
 }
 
@@ -389,7 +407,24 @@ void DLNAActivity::showLiveQuality() {
     const auto choices = liveQualities;
     BaseDropdown::text("wiliwili/player/quality"_i18n, names, [this, guard, choices](int index) {
         if (!*guard || requesting || index < 0 || static_cast<size_t>(index) >= choices.size()) return;
-        loadLiveRoom(activeRoom, activeDouyu, choices[index].id);
+        loadLiveRoom(activeRoom, activeDouyu, choices[index].id, false, selectedLine);
+    }, selected);
+}
+
+void DLNAActivity::showLiveLine() {
+    if (activeRoom.empty() || requesting || liveLines.empty()) return;
+    std::vector<std::string> names;
+    int selected = 0;
+    for (size_t index = 0; index < liveLines.size(); ++index) {
+        names.push_back(liveLines[index].name);
+        if (liveLines[index].id == selectedLine) selected = static_cast<int>(index);
+    }
+    auto guard = inputAlive;
+    const auto choices = liveLines;
+    BaseDropdown::text("wiliwili/live_browser/line"_i18n, names, [this, guard, choices](int index) {
+        if (!*guard || requesting || index < 0 || static_cast<size_t>(index) >= choices.size()) return;
+        if (choices[index].id != selectedLine)
+            loadLiveRoom(activeRoom, activeDouyu, selectedQuality, false, choices[index].id);
     }, selected);
 }
 

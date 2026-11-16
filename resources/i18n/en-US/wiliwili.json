@@ -12,6 +12,7 @@
     "danmaku_failed": "Danmaku unavailable; video can continue",
     "danmaku_connecting": "Connecting danmaku",
     "loading_stream": "Loading live stream",
+    "line": "Stream line",
     "reconnecting": "Reconnecting",
     "retry_failed": "Connection failed; press + to retry or return to the list",
     "retry": "Retry stream",

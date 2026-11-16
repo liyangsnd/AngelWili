@@ -29,8 +29,10 @@ public:
 private:
     void openHuyaRoom(const std::string& room);
     void openDouyuRoom(const std::string& room);
-    void loadLiveRoom(const std::string& room, bool douyu, int quality = -1, bool recovery = false);
+    void loadLiveRoom(const std::string& room, bool douyu, int quality = -1, bool recovery = false,
+                      const std::string& line = "");
     void showLiveQuality();
+    void showLiveLine();
     void scheduleLiveRetry(bool lowerQuality);
     void cancelLiveRetry();
     void stopLiveDanmaku();
@@ -41,6 +43,8 @@ private:
     bool activeDouyu = false;
     int selectedQuality = -1;
     std::vector<live::StreamQuality> liveQualities;
+    std::string selectedLine;
+    std::vector<live::StreamLine> liveLines;
     live::RecoveryBudget recoveryBudget;
     size_t retryDelay = 0;
     bool retryPending = false;

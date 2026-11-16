@@ -18,6 +18,11 @@ struct StreamQuality {
     int bitrate;
 };
 
+struct StreamLine {
+    std::string id;
+    std::string name;
+};
+
 inline int preferredQuality(const std::vector<StreamQuality>& qualities, int fallback) {
     int selected = fallback;
     int bitrate = -1;

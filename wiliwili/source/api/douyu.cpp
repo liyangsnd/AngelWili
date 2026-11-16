@@ -103,13 +103,13 @@ std::string signDouyu(const std::string& script, const std::string& room,
 }
 
 void requestDouyuRoom(const std::string& room, const std::function<void(DouyuRoom)>& success,
-                      const std::function<void(std::string)>& error, int quality) {
+                      const std::function<void(std::string)>& error, int quality, const std::string& line) {
     if (room.empty() || room.size() > 16 || room.find_first_not_of("0123456789") != std::string::npos) {
         error("Invalid Douyu room number");
         return;
     }
     if (quality < -1 || quality > 10000) { error("Invalid Douyu quality"); return; }
-    cpr::GetCallback([room, success, error, quality](const cpr::Response& response) {
+    cpr::GetCallback([room, success, error, quality, line](const cpr::Response& response) {
         try {
             if (response.error || response.status_code != 200) throw std::runtime_error("Douyu signing request failed");
             auto document = nlohmann::json::parse(response.text);
@@ -122,13 +122,15 @@ void requestDouyuRoom(const std::string& room, const std::function<void(DouyuRoo
             auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count();
             auto signature = signDouyu(script, room, device, std::to_string(timestamp));
-            auto fetchQuality = [&signature, &room](int rate) {
+            auto fetchQuality = [&signature, &room](int rate, const std::string& cdn) {
+                const std::string body = signature + "&rate=" + std::to_string(rate) +
+                    (cdn.empty() ? "" : "&cdn=" + cpr::util::urlEncode(cdn));
                 return cpr::Post(cpr::Url{"https://www.douyu.com/lapi/live/getH5Play/" + room},
-                cpr::Timeout{10000}, cpr::Body{signature + "&rate=" + std::to_string(rate)},
+                cpr::Timeout{10000}, cpr::Body{body},
                 cpr::Header{{"Content-Type", "application/x-www-form-urlencoded"},
                             {"Referer", "https://www.douyu.com/" + room}, {"Origin", "https://www.douyu.com"}});
             };
-            auto playback = fetchQuality(quality < 0 ? 3 : quality);
+            auto playback = fetchQuality(quality < 0 ? 3 : quality, line);
             if (playback.error || playback.status_code != 200) throw std::runtime_error("Douyu playback request failed");
             auto info = nlohmann::json::parse(playback.text);
             if (info.at("error").get<int>() != 0) throw std::runtime_error("Douyu room is offline or playback unavailable");
@@ -138,7 +140,8 @@ void requestDouyuRoom(const std::string& room, const std::function<void(DouyuRoo
                     offered.push_back({variant.at("rate").get<int>(), variant.at("name").get<std::string>(), variant.value("bit", 0)});
                 const int preferred = preferredQuality(offered, info.at("data").value("rate", 3));
                 if (preferred != info.at("data").value("rate", 3)) {
-                    auto upgraded = fetchQuality(preferred);
+                    const std::string cdn = info.at("data").value("selected_cdn", line);
+                    auto upgraded = fetchQuality(preferred, cdn);
                     if (!upgraded.error && upgraded.status_code == 200) {
                         auto candidate = nlohmann::json::parse(upgraded.text);
                         if (candidate.value("error", -1) == 0) info = std::move(candidate);
@@ -158,7 +161,21 @@ void requestDouyuRoom(const std::string& room, const std::function<void(DouyuRoo
             for (const auto& variant : data.at("multirates")) {
                 qualities.push_back({variant.at("rate").get<int>(), variant.at("name").get<std::string>(), variant.value("bit", 0)});
             }
-            success({"Douyu " + room, url, qualities, data.value("rate", quality < 0 ? 3 : quality)});
+            std::vector<StreamLine> lines;
+            const auto cdns = data.find("cdnsWithName");
+            if (cdns != data.end() && cdns->is_array()) {
+                for (const auto& cdn : *cdns) {
+                    if (!cdn.is_object()) continue;
+                    const auto id = cdn.value("cdn", "");
+                    if (id.empty()) continue;
+                    lines.push_back({id, cdn.value("name", id)});
+                }
+            }
+            const std::string selectedCdn = data.value("selected_cdn", line);
+            if (!line.empty() && !selectedCdn.empty() && selectedCdn != line)
+                throw std::runtime_error("Requested Douyu line unavailable");
+            success({"Douyu " + room, url, qualities, data.value("rate", quality < 0 ? 3 : quality),
+                     {}, lines, selectedCdn});
         } catch (const std::exception& failure) {
             error(failure.what());
         }

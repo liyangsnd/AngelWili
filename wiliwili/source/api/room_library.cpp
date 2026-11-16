@@ -30,6 +30,29 @@ std::vector<live::SavedRoom> decode(const nlohmann::json& data, size_t limit) {
     }
     return result;
 }
+
+bool replaceFile(const std::filesystem::path& temporary, const std::filesystem::path& target) {
+    std::error_code error;
+    std::filesystem::rename(temporary, target, error);
+    if (!error) return true;
+
+    error.clear();
+    if (!std::filesystem::exists(target, error) || error) return false;
+    const auto backup = std::filesystem::path(target.string() + ".bak");
+    std::filesystem::remove(backup, error);
+    if (error) return false;
+    std::filesystem::rename(target, backup, error);
+    if (error) return false;
+
+    std::filesystem::rename(temporary, target, error);
+    if (error) {
+        std::error_code restoreError;
+        std::filesystem::rename(backup, target, restoreError);
+        return false;
+    }
+    std::filesystem::remove(backup, error);
+    return true;
+}
 }
 
 namespace live {
@@ -49,15 +72,16 @@ RoomLibrary::RoomLibrary(std::string file) : path(std::move(file)) {
 bool RoomLibrary::save() {
     if (!healthy) return false;
     try {
-        std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+        const auto target = std::filesystem::path(path);
+        if (!target.parent_path().empty()) std::filesystem::create_directories(target.parent_path());
+        const auto temporary = std::filesystem::path(path + ".tmp");
         {
-            std::ofstream output(path + ".tmp", std::ios::trunc);
+            std::ofstream output(temporary, std::ios::trunc);
             output << nlohmann::json{{"version", 1}, {"favorites", encode(favoriteRooms)}, {"recent", encode(recentRooms)}}.dump(2);
             output.flush();
             if (!output.good()) return false;
         }
-        std::filesystem::rename(path + ".tmp", path);
-        return true;
+        return replaceFile(temporary, target);
     } catch (const std::exception&) { return false; }
 }
 

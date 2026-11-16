@@ -24,7 +24,8 @@ int main(int argc, char** argv) {
         if (!stopped) throw std::runtime_error("Resource limit not enforced");
         std::cout << "PASS resource limit\n";
         if (argc > 1) {
-            const int requestedQuality = argc > 2 ? std::stoi(argv[2]) : -1;
+            const bool lineOnly = argc > 2 && std::string(argv[2]) == "--line-only";
+            const int requestedQuality = argc > 2 && !lineOnly ? std::stoi(argv[2]) : -1;
             std::promise<live::DouyuRoom> promise;
             auto result = promise.get_future();
             live::requestDouyuRoom(argv[1], [&promise](live::DouyuRoom room) {
@@ -37,6 +38,23 @@ int main(int argc, char** argv) {
             if (room.qualities.empty() || (requestedQuality >= 0 && room.selectedQuality != requestedQuality))
                 throw std::runtime_error("Douyu quality selection mismatch");
             std::cout << "PASS native public room resolution\n";
+            if (lineOnly) {
+                if (room.lines.size() < 2 || room.selectedLine.empty())
+                    throw std::runtime_error("Douyu alternate lines unavailable");
+                std::promise<live::DouyuRoom> alternatePromise;
+                auto alternateResult = alternatePromise.get_future();
+                const auto alternateLine = room.lines.back().id;
+                live::requestDouyuRoom(argv[1], [&alternatePromise](live::DouyuRoom alternate) {
+                    alternatePromise.set_value(std::move(alternate));
+                }, [&alternatePromise](std::string error) {
+                    alternatePromise.set_exception(std::make_exception_ptr(std::runtime_error(error)));
+                }, room.selectedQuality, alternateLine);
+                const auto alternate = alternateResult.get();
+                if (alternate.selectedLine != alternateLine || alternate.url == room.url)
+                    throw std::runtime_error("Douyu line selection mismatch");
+                std::cout << "PASS native Douyu line selection\n";
+                return 0;
+            }
             size_t bytes = 0;
             start = std::chrono::steady_clock::now();
             auto media = cpr::Get(cpr::Url{room.url}, cpr::Timeout{12000},

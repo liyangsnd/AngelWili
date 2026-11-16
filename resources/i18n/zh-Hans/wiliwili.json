@@ -12,6 +12,7 @@
     "danmaku_failed": "弹幕连接失败，视频可继续播放",
     "danmaku_connecting": "正在连接弹幕",
     "loading_stream": "正在加载直播",
+    "line": "切换线路",
     "reconnecting": "正在重新连接",
     "retry_failed": "连接失败，按 + 重试或返回列表",
     "retry": "重试直播",

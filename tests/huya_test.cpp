@@ -13,6 +13,14 @@ int main(int argc, char** argv) {
             rejected = true;
         }
         if (!rejected) throw std::runtime_error("Missing stream was accepted");
+        const std::string linePage = R"({"stream":{"data":[{"gameStreamInfoList":[{"sCdnType":"HS","sFlvAntiCode":"fm=cHJlZml4X3N1ZmZpeA%3D%3D&ctype=web&fs=1&wsTime=1","sStreamName":"test","sFlvUrl":"https://cdn-a.example/live","sFlvUrlSuffix":"flv"},{"sCdnType":"TX","sFlvAntiCode":"fm=cHJlZml4X3N1ZmZpeA%3D%3D&ctype=web&fs=1&wsTime=1","sStreamName":"test","sFlvUrl":"https://cdn-b.example/live","sFlvUrlSuffix":"flv"}],"gameLiveInfo":{"roomName":"Test"}}],"vMultiStreamInfo":[{"iBitRate":4000,"sDisplayName":"1080p"}]}})";
+        const auto defaultLine = live::parseHuyaRoom(linePage);
+        const auto alternateLine = live::parseHuyaRoom(linePage, -1, "1");
+        if (defaultLine.lines.size() != 2 || defaultLine.selectedLine != "0" ||
+            alternateLine.selectedLine != "1" || alternateLine.url.find("cdn-b.example") == std::string::npos ||
+            alternateLine.url == defaultLine.url)
+            throw std::runtime_error("Huya line selection mismatch");
+        std::cout << "PASS Huya line enumeration and selection\n";
         bool invalidRoom = false;
         live::requestHuyaRoom("../invalid", [](live::HuyaRoom) {
             throw std::runtime_error("Invalid room was accepted");
@@ -41,11 +49,19 @@ int main(int argc, char** argv) {
             auto room = live::parseHuyaRoom(response.text);
             if (room.url.find("wsSecret=") == std::string::npos || room.title.empty())
                 throw std::runtime_error("Invalid resolved room");
+            if (room.lines.empty() || room.selectedLine.empty())
+                throw std::runtime_error("No Huya stream lines returned");
             std::cout << "PASS public room parser\n";
             if (room.qualities.empty()) throw std::runtime_error("No Huya quality list");
             auto selected = live::parseHuyaRoom(response.text, room.qualities.back().id);
             if (selected.selectedQuality != room.qualities.back().id) throw std::runtime_error("Huya quality selection mismatch");
             std::cout << "PASS actual Huya quality selection\n";
+            if (room.lines.size() > 1) {
+                const auto alternate = live::parseHuyaRoom(response.text, room.selectedQuality, room.lines.back().id);
+                if (alternate.selectedLine != room.lines.back().id || alternate.url == room.url)
+                    throw std::runtime_error("Huya line selection mismatch");
+                std::cout << "PASS actual Huya line selection\n";
+            }
             if (argc > 2 && std::string(argv[2]) == "--stream") {
                 size_t bytes = 0;
                 auto start = std::chrono::steady_clock::now();
